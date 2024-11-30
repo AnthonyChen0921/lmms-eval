@@ -31,8 +31,9 @@ class TALlava(lmms):
 
     def __init__(self, pretrained: str, device: str = "cuda", **kwargs) -> None:
         super().__init__()
-        assert kwargs == {}, f"Unexpected kwargs: {kwargs}"
-
+        # assert kwargs == {}, f"Unexpected kwargs: {kwargs}"
+        self.batch_size_per_gpu = kwargs.pop("batch_size", 1)
+        
         # Load the model, tokenizer, etc.
         self._tokenizer, self._model, self._image_processor, self._context_len, self._vision_priori = load_pretrained_model(
             model_path=pretrained,
@@ -97,25 +98,59 @@ class TALlava(lmms):
 
     def loglikelihood(self, requests: List[Instance]) -> List[Tuple[float, bool]]:
         res = []
+        pbar = tqdm(total=len(requests), desc="Calculating log probabilities", unit="request")
+
         for req in requests:
             context, target, doc_to_visual, doc_id, task, split = req.args
-            
-            # tokenization
-            input_ids = self.tokenizer(context, return_tensors="pt", truncation=True, padding=True).input_ids.to(self.device)
-            target_ids = self.tokenizer(target, return_tensors="pt", truncation=True, padding=True).input_ids.to(self.device)
-            
+
+            context_tokens = self.tokenizer(
+                context, 
+                return_tensors="pt", 
+                truncation=True, 
+                padding=True
+            )
+            target_tokens = self.tokenizer(
+                target, 
+                return_tensors="pt", 
+                truncation=True, 
+                padding=True
+            )
+
+            input_ids = context_tokens.input_ids.to(self.device)
+            attention_mask = context_tokens.attention_mask.to(self.device)
+            target_ids = target_tokens.input_ids.to(self.device)
+
             if doc_to_visual:
-                images = [doc_to_visual(doc_id)]
-                images = torch.stack([self._image_processor(image) for image in images]).to(self.device)
-                output = self.model.vis_forward(input_ids=input_ids, images=images, labels=target_ids)
+                doc = self.task_dict[task][split][doc_id]
+                raw_image = doc_to_visual(doc)
+
+                image_tensor = self._image_processor(raw_image, return_tensors="pt")["pixel_values"].squeeze(0)
+                image_tensor = torch.clamp(image_tensor, 0.0, 1.0).to(dtype=torch.bfloat16, device=self.device)
+
+                images = torch.stack([image_tensor])
+
+                output = self.model.vis_forward(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    images=images,
+                    labels=target_ids
+                )
             else:
-                output = self.model.text_forward(input_ids=input_ids, labels=target_ids)
-            
-            # log-likelihood
-            log_probs = -output.loss.item() 
+                output = self.model.text_forward(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    labels=target_ids
+                )
+
+            log_probs = -output.loss.item()
             greedy_match = (output.logits.argmax(dim=-1) == target_ids).all().item()
-            res.append((log_probs, greedy_match)) 
+
+            res.append((log_probs, greedy_match))
+            pbar.update(1)
+
+        pbar.close()
         return res
+
 
     def flatten(self, input):
         new_list = []

@@ -8,16 +8,11 @@ print("Using device:", device)
 
 
 def handle_non_serializable(obj):
-    """
-    Handle non-serializable objects.
-    Convert known problematic types to a serializable format or remove them.
-    """
     if callable(obj):
-        return str(obj)  # Convert function objects to string representation
+        return str(obj) 
     elif isinstance(obj, torch.Tensor):
-        return obj.tolist()  # Convert tensors to lists
-    # Add more cases if needed
-    return str(obj)  # Fallback: Convert to string
+        return obj.tolist()
+    return str(obj)
 
 
 tasks = ["pope"]
@@ -29,7 +24,6 @@ results = simple_evaluate(
     num_fewshot=0,
     device="cuda" if torch.cuda.is_available() else "cpu",
     verbosity="INFO",
-    limit=200,
 )
 
 # save the results
