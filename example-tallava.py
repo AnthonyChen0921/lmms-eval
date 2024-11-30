@@ -16,8 +16,8 @@ def main():
     # model.eval()
 
     # prompts
-    url = "https://www.ilankelman.org/stopsigns/australia.jpg"
-    # url ="https://d2luddxp0py34j.cloudfront.net/m7v8fd%2Fpreview%2F62772079%2Fmain_full.png?response-content-disposition=inline%3Bfilename%3D%22main_full.png%22%3B&response-content-type=image%2Fpng&Expires=1732847086&Signature=g4umObOD7coneLPk9KZwsWSETKWElldsSV1X6ByPPBxjzFJ847nQSaWjeXKNb~2wH6lITjkDTur97MhXk6cMUxYFBPkcSljXx6GRvZNYr9qTrB7aDdPEOOIfeuGj7wsSMNmvDepWl7b5gQrtDcTvpgIPpcGzmbIMVaglEsFFJ~ivZYCvC3mQTO1df8EYvnruJvb6N5kPEJ4M3kvkZ2Z5AoP7yX6VF7A74k57Xm3bzrDdRumUcBZp5l03gPlFgJZAszcQwNfzDPunW2-5KNQGUUo0zZYaddApeHf3EIGK~GpiyIpP4ePTsP7NSezJMN6yBWFAA0FpOMUKLMk5z6~51w__&Key-Pair-Id=APKAJT5WQLLEOADKLHBQ"
+    # url = "https://www.ilankelman.org/stopsigns/australia.jpg"
+    url = "https://www.ilankelman.org/themes2/catns.jpg"
     context = "<bos><start_of_turn>user\nDescribe the image.\n<end_of_turn>model\n"
     # context = "<bos><start_of_turn>user \n Please carefully observe the image and describe what you see.\n <end_of_turn> model \n"
     gen_kwargs = {

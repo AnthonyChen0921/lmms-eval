@@ -114,7 +114,7 @@ class TALlava(lmms):
             # log-likelihood
             log_probs = -output.loss.item() 
             greedy_match = (output.logits.argmax(dim=-1) == target_ids).all().item()
-            res.append((log_probs, greedy_match))
+            res.append((log_probs, greedy_match)) 
         return res
 
     def flatten(self, input):
@@ -123,7 +123,13 @@ class TALlava(lmms):
             for j in i:
                 new_list.append(j)
         return new_list
+    
+    def pope_doc_to_visual(doc):
+        print(f"Received doc: {doc}")
+        return [doc["image"].convert("RGB")]
 
+    # uncomment this, and run example-tallava.py
+    '''
     def generate_until(self, requests: List[Instance]) -> List[str]:
         res = []
         for req in requests:
@@ -171,109 +177,68 @@ class TALlava(lmms):
             # print(output_text) 
             res.append(output_text)
         return res
+    
+    '''
 
-    # def generate_until(self, requests: List[Instance]) -> List[str]:
-    #     res = []
 
-    #     # Define the collate function for sorting
-    #     def _collate(req):
-    #         context = req.arguments[0]
-    #         toks = self.tokenizer.encode(context)
-    #         return -len(toks), req
+    def generate_until(self, requests: List[Instance]) -> List[str]:
+        res = []
+        pbar = tqdm(total=len(requests), desc="Processing requests", unit="request")
 
-    #     # Use Collator with the original requests
-    #     re_ords = utils.Collator(requests, _collate, grouping=False)
-    #     chunks = re_ords.get_batched(n=self.batch_size, batch_fn=None)
-    #     chunks = list(chunks)  # Convert generator to list
-    #     num_iters = len(chunks)
-    #     pbar = tqdm(total=num_iters, disable=(self.rank != 0), desc="Model Responding")
+        for req in requests:
+            context, gen_kwargs, doc_to_visual, doc_id, task, split = req.arguments
+            
+            tokens = self.tokenizer(
+                context, 
+                return_tensors="pt", 
+                truncation=True, 
+                padding=True
+            )
+            input_ids = tokens.input_ids.to(self.device)
+            attention_mask = tokens.attention_mask.to(self.device)
 
-    #     for chunk in chunks:
-    #         contexts = []
-    #         all_gen_kwargs = []
-    #         doc_to_visuals = []
-    #         doc_ids = []
-    #         tasks = []
-    #         splits = []
-    #         reqs = []
+            if doc_to_visual:
+                # print("Using visual input")
+                doc = self.task_dict[task][split][doc_id]
+                raw_image = doc_to_visual(doc) 
+            
+                # torch.Tensor
+                image_tensor = self._image_processor(raw_image, return_tensors="pt")["pixel_values"].squeeze(0)
+                image_tensor = torch.clamp(image_tensor, 0.0, 1.0).to(dtype=torch.bfloat16, device=self.device)
+                
+                # stack the image_tensor
+                images = torch.stack([image_tensor])
+                
+                # images is list of torch.Tensor
+                # images = torch.stack(images).to(self.device, dtype=torch.bfloat16)
+                
+                if "until" in gen_kwargs:
+                    del gen_kwargs["until"]
 
-    #         for req in chunk:
-    #             context, gen_kwargs, doc_to_visual, doc_id, task_name, split = req.arguments
-    #             contexts.append(context)
-    #             all_gen_kwargs.append(gen_kwargs)
-    #             doc_to_visuals.append(doc_to_visual)
-    #             doc_ids.append(doc_id)
-    #             tasks.append(task_name)
-    #             splits.append(split)
-    #             reqs.append(req)
+                output_ids = self.model.generate(
+                    input_ids=input_ids, 
+                    attention_mask=attention_mask,
+                    images=images, 
+                    **gen_kwargs
+                )
+            else:
+                if "until" in gen_kwargs:
+                    del gen_kwargs["until"]
+                output_ids = self.model.generate(
+                    input_ids=input_ids, 
+                    attention_mask=attention_mask, 
+                    **gen_kwargs
+                )
+            
+            output_text = self.tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0]
+            # print(output_text) 
+            pbar.update(1)
+            res.append(output_text)
+            
+        pbar.close()
+        return res
 
-    #         gen_kwargs = all_gen_kwargs[0]  # Assume same gen_kwargs in batch
 
-    #         # Prepare contexts and images
-    #         input_texts = []
-    #         images = []
-    #         for context, doc_to_visual, doc_id, task_name, split, req in zip(
-    #             contexts, doc_to_visuals, doc_ids, tasks, splits, reqs
-    #         ):
-    #             # Retrieve the doc from the request
-    #             doc = req.doc
-    #             if doc_to_visual and doc is not None:
-    #                 image = doc_to_visual(doc)
-    #                 # Preprocess the image
-    #                 if not isinstance(image, torch.Tensor):
-    #                     image = self._image_processor(image, return_tensors="pt")["pixel_values"][0]
-    #                 image = torch.clamp(image, 0.0, 1.0).to(dtype=torch.bfloat16)
-    #                 images.append(image)
-    #                 # Add image token to context if not present
-    #                 if "<image>" not in context:
-    #                     context = "<image>\n" + context
-    #             else:
-    #                 images.append(None)
-    #             input_texts.append(context)
-
-    #         # Tokenize inputs
-    #         tokens = self.tokenizer(
-    #             input_texts,
-    #             return_tensors="pt",
-    #             truncation=True,
-    #             padding=True
-    #         )
-    #         input_ids = tokens.input_ids.to(self.device)
-    #         attention_mask = tokens.attention_mask.to(self.device)
-
-    #         # Stack images if any
-    #         if any(img is not None for img in images):
-    #             images = [img if img is not None else torch.zeros_like(images[0]) for img in images]
-    #             images = torch.stack(images).to(self.device, dtype=torch.bfloat16)
-    #         else:
-    #             images = None
-
-    #         # Set default generation parameters if not provided
-    #         gen_kwargs.setdefault("max_new_tokens", 1024)
-    #         gen_kwargs.setdefault("temperature", 0.0)
-    #         gen_kwargs.setdefault("top_p", 1.0)
-    #         gen_kwargs.setdefault("num_beams", 1)
-
-    #         # Generate outputs
-    #         try:
-    #             output_ids = self.model.generate(
-    #                 input_ids=input_ids,
-    #                 attention_mask=attention_mask,
-    #                 images=images,
-    #                 **gen_kwargs
-    #             )
-    #             text_outputs = self.tokenizer.batch_decode(output_ids, skip_special_tokens=True)
-    #         except Exception as e:
-    #             eval_logger.error(f"Error {e} in generating")
-    #             text_outputs = [""] * len(contexts)
-
-    #         res.extend(text_outputs)
-    #         pbar.update(1)
-
-    #     pbar.close()
-    #     # Reorder results to original request order
-    #     res = re_ords.get_original(res)
-    #     return res
 
 
 
